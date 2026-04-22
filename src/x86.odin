@@ -1,5 +1,86 @@
 package reality86
 
+/*
+Copyright 2026 John Clemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software 
+and associated documentation files (the “Software”), to deal in the Software without restriction, 
+including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, 
+subject to the following conditions:
+
+The above copyright notice and this permission notice 
+shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, 
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, 
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, 
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR 
+THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+
+// Feel free to copy this out, modify it, whatever (under the terms of the MIT license)
+// if you need a base x86 encoder to work from :)
+
+// A quick rundown of how the encoding of your run-of-the-mill x86 instruction works
+// (And also how it relates to the code below):
+//  opt = Optional
+//  doi = Depends on instruction / Opcode
+//  doo = Depends on operands
+//
+//  Operation bytes                    Addressing bytes
+//  _______________________________    ____________________________________________
+//  |                             |    |                                          |
+//  [Prefixes] -> [REX] -> [Opcode] -> [Mod R/M] -> [SIB] -> [Pointer Displacement] -> [Immediate]
+//   ^ opt         ^ opt/doo            ^ doi        ^ doo    ^ doo                     ^ doi
+//
+//     First you have the prefixes, these come in various forms; 
+//   for example 0x66 is an operand size prefix, 
+//   all it does in 64-bit mode is change the operand size to 16-bits
+//   so you can treat registers and immediates etc. all as 16-bits instead of 32 or 64
+//   This is encoded per instruction procedure.
+//   
+//     Second comes the REX byte, this allows you to address additional registers of any size
+//   by adding an extra bit to the relevant fields,
+//   or set an originally 32-bit instruction to a 64-bit operand size.
+//     This is encoded using the procedure _x86_enc_rex, though the bits of REX are manipulated
+//   per instruction procedure. 
+//     In some cases it also checks whether or not the REX byte is 
+//   needed for certain non-64-bit instructions due to register addressing 
+//   using the _x86_is_rex_needed procedure and for 8bit operations _x86_is_rex_needed_for_8breg 
+//   and _x86_is_rex_needed_for_8bregs procedures.
+//   This allows for omitting the REX byte when it is not needed.
+//
+//     Third is the actual opcode, this is a byte or sometimes a few that encodes
+//   the actual instruction we want to execute. Sometimes other things may be encoded
+//   into this byte like the least significant 3 bits might encode a register for some operations 
+//   if it doesn't use the Mod R/M byte.
+//   This is encoded per instruction procedure.
+//   
+//     Next is the Mod R/M byte, SIB, and Displacement bytes.
+//   These all kind of go together since they all kind of inter-depend
+//   on eachothers fields. The Mod R/M byte itself selects an addressing mode,
+//   it can be as simple as telling the instruction to operate on two registers,
+//   or use one of the registers as a pointer (the R/M meaning Register/Memory),
+//   also with options to allow that pointer to be offset by a Displacement.
+//     It also has the option to use an additional byte called the SIB (Scale, Index, Base) byte
+//   which allows you to choose a Base register, an Index register, and a Scale value (1, 2, 4, or 8)
+//   to calculate a final effective address in memory to access. The very basic formula is 
+//   simply Base + Index * Scale.
+//     The encoding of these bytes is handled by two procedures in my implementation,
+//   _x86_enc_rm_reg for the simple register case, and _x86_enc_rm_mem for 
+//   the more complicated memory operand case.
+//
+//     Last is the Immediate, this is just like the Displacement in that it's just a raw value 
+//   ordered in Little Endian that comes after the Instruction. 
+//   If there's also a Displacement, that comes before.
+//   This is encoded per instruction procedure.
+//
+//     This should hopefully be enough knowledge to be able to extend it and understand
+//   why the code is structured as it is.
+
 import "core:math/bits"
 
 X86_MAX_INST_LENGTH :: 15 // 15 bytes is the max instruction length on x86-64
