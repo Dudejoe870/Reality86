@@ -89,7 +89,7 @@ x86_Reg :: enum u8 {
 	None = 0,
 	AX = 0b001_00000, CX, DX, BX, SP, BP, SI, DI,
 	R8, R9, R10, R11, R12, R13, R14, R15,
-	IP,
+	IP = 0b111_00000, // RIP is special
 	AH = 0b010_00100, CH, DH, BH, // GPH registers start at a offset of 4
 	ES = 0b011_00000, CS, SS, DS, FS, GS,
 	XMM0 = 0b100_00000, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
@@ -1142,6 +1142,7 @@ x86_add64_reg_imm :: proc(
 
 	rex := _x86_enc_rex(buffer, &offset)
 	rex.w = true
+	rex.b = u8(dst) & 0b1000 > 0
 
 	if i32(i8(imm)) == imm {
 		buffer[offset] = 0x83
@@ -1264,6 +1265,7 @@ x86_add32_reg_imm :: proc(
 	rex: ^x86_REX
 	if _x86_is_rex_needed({ dst, .None, .None }) {
 		rex = _x86_enc_rex(buffer, &offset)
+		rex.b = u8(dst) & 0b1000 > 0
 	}
 
 	if i32(i8(imm)) == imm {
@@ -1398,6 +1400,7 @@ x86_add16_reg_imm :: proc(
 	rex: ^x86_REX
 	if _x86_is_rex_needed({ dst, .None, .None }) {
 		rex = _x86_enc_rex(buffer, &offset)
+		rex.b = u8(dst) & 0b1000 > 0
 	}
 
 	if i16(i8(imm)) == imm {
@@ -1523,6 +1526,122 @@ x86_add16_reg_to_rm_mem :: proc(
 	return offset
 }
 
+x86_add8 :: proc {
+	x86_add8_reg,
+	x86_add8_rm_mem_to_reg,
+	x86_add8_reg_to_rm_mem,
+	x86_add8_reg_imm,
+	x86_add8_rm_mem_imm,
+}
+
+x86_add8_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i8,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, .None, .None }) || _x86_is_rex_needed_for_8breg(dst) {
+		rex = _x86_enc_rex(buffer, &offset)
+		rex.b = u8(dst) & 0b1000 > 0
+	}
+
+	if dst == .AX {
+		buffer[offset] = 0x04
+		offset += 1
+	} else {
+		buffer[offset] = 0x80
+		offset += 1
+
+		_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, op = 0, rex = rex)
+	}
+	buffer[offset] = transmute(u8)imm
+	offset += 1
+	return offset
+}
+
+x86_add8_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i8,
+) -> int {
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x80
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 0, rex = rex)
+	
+	buffer[offset] = transmute(u8)i8(imm)
+	offset += 1
+	return offset
+}
+
+x86_add8_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	assert(_x86_is_gpl(op) || _x86_is_gph(op))
+	assert(!(_x86_is_gph(dst) && _x86_is_rex_needed_for_8breg(op)))
+	assert(!(_x86_is_gph(op) && _x86_is_rex_needed_for_8breg(dst)))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, op, .None }) || _x86_is_rex_needed_for_8bregs(dst, op) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x00
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = op, rm = dst, rex = rex)
+	return offset
+}
+
+x86_add8_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ op.base, op.index, dst }) || _x86_is_rex_needed_for_8breg(dst) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x02
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = op, rex = rex)
+	return offset
+}
+
+x86_add8_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(op) || _x86_is_gph(op))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, op }) || _x86_is_rex_needed_for_8breg(op) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x00
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = op, ptr = dst, rex = rex)
+	return offset
+}
+
 x86_adc64 :: proc {
 	x86_adc64_reg,
 	x86_adc64_rm_mem_to_reg,
@@ -1540,6 +1659,7 @@ x86_adc64_reg_imm :: proc(
 
 	rex := _x86_enc_rex(buffer, &offset)
 	rex.w = true
+	rex.b = u8(dst) & 0b1000 > 0
 
 	if i32(i8(imm)) == imm {
 		buffer[offset] = 0x83
@@ -1553,6 +1673,7 @@ x86_adc64_reg_imm :: proc(
 		if dst == .AX {
 			buffer[offset] = 0x15
 			offset += 1
+			
 		} else {
 			buffer[offset] = 0x81
 			offset += 1
@@ -1662,6 +1783,7 @@ x86_adc32_reg_imm :: proc(
 	rex: ^x86_REX
 	if _x86_is_rex_needed({ dst, .None, .None }) {
 		rex = _x86_enc_rex(buffer, &offset)
+		rex.b = u8(dst) & 0b1000 > 0
 	}
 
 	if i32(i8(imm)) == imm {
@@ -1676,6 +1798,7 @@ x86_adc32_reg_imm :: proc(
 		if dst == .AX {
 			buffer[offset] = 0x15
 			offset += 1
+			
 		} else {
 			buffer[offset] = 0x81
 			offset += 1
@@ -1796,6 +1919,7 @@ x86_adc16_reg_imm :: proc(
 	rex: ^x86_REX
 	if _x86_is_rex_needed({ dst, .None, .None }) {
 		rex = _x86_enc_rex(buffer, &offset)
+		rex.b = u8(dst) & 0b1000 > 0
 	}
 
 	if i16(i8(imm)) == imm {
@@ -1810,6 +1934,7 @@ x86_adc16_reg_imm :: proc(
 		if dst == .AX {
 			buffer[offset] = 0x15
 			offset += 1
+			
 		} else {
 			buffer[offset] = 0x81
 			offset += 1
@@ -1915,6 +2040,640 @@ x86_adc16_reg_to_rm_mem :: proc(
 	}
 
 	buffer[offset] = 0x11
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = op, ptr = dst, rex = rex)
+	return offset
+}
+
+x86_adc8 :: proc {
+	x86_adc8_reg,
+	x86_adc8_rm_mem_to_reg,
+	x86_adc8_reg_to_rm_mem,
+	x86_adc8_reg_imm,
+	x86_adc8_rm_mem_imm,
+}
+
+x86_adc8_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i8,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, .None, .None }) || _x86_is_rex_needed_for_8breg(dst) {
+		rex = _x86_enc_rex(buffer, &offset)
+		rex.b = u8(dst) & 0b1000 > 0
+	}
+
+	if dst == .AX {
+		buffer[offset] = 0x14
+		offset += 1
+	} else {
+		buffer[offset] = 0x80
+		offset += 1
+
+		_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, op = 2, rex = rex)
+	}
+	buffer[offset] = transmute(u8)imm
+	offset += 1
+	return offset
+}
+
+x86_adc8_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i8,
+) -> int {
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x80
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 2, rex = rex)
+	
+	buffer[offset] = transmute(u8)i8(imm)
+	offset += 1
+	return offset
+}
+
+x86_adc8_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	assert(_x86_is_gpl(op) || _x86_is_gph(op))
+	assert(!(_x86_is_gph(dst) && _x86_is_rex_needed_for_8breg(op)))
+	assert(!(_x86_is_gph(op) && _x86_is_rex_needed_for_8breg(dst)))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, op, .None }) || _x86_is_rex_needed_for_8bregs(dst, op) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x10
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = op, rm = dst, rex = rex)
+	return offset
+}
+
+x86_adc8_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ op.base, op.index, dst }) || _x86_is_rex_needed_for_8breg(dst) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x12
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = op, rex = rex)
+	return offset
+}
+
+x86_adc8_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(op) || _x86_is_gph(op))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, op }) || _x86_is_rex_needed_for_8breg(op) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x10
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = op, ptr = dst, rex = rex)
+	return offset
+}
+
+x86_sub64 :: proc {
+	x86_sub64_reg,
+	x86_sub64_rm_mem_from_reg,
+	x86_sub64_reg_from_rm_mem,
+	x86_sub64_reg_imm,
+	x86_sub64_rm_mem_imm,
+}
+
+x86_sub64_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i32,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+	rex.b = u8(dst) & 0b1000 > 0
+
+	if i32(i8(imm)) == imm {
+		buffer[offset] = 0x83
+		offset += 1
+
+		_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, op = 5, rex = rex)
+		
+		buffer[offset] = transmute(u8)i8(imm)
+		offset += 1
+	} else {
+		if dst == .AX {
+			buffer[offset] = 0x2D
+			offset += 1
+			
+		} else {
+			buffer[offset] = 0x81
+			offset += 1
+
+			_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, op = 5, rex = rex)
+		}
+		(transmute(^type_of(imm))&buffer[offset])^ = imm
+		offset += size_of(imm)
+	}
+	return offset
+}
+
+x86_sub64_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i32,
+) -> int {
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+
+	if i32(i8(imm)) == imm {
+		buffer[offset] = 0x83
+		offset += 1
+
+		_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 5, rex = rex)
+		
+		buffer[offset] = transmute(u8)i8(imm)
+		offset += 1
+	} else {
+		buffer[offset] = 0x81
+		offset += 1
+
+		_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 5, rex = rex)
+		(transmute(^type_of(imm))&buffer[offset])^ = imm
+		offset += size_of(imm)
+	}
+	return offset
+}
+
+x86_sub64_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst) && _x86_is_gpl(op))
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+
+	buffer[offset] = 0x29
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = op, rm = dst, rex = rex)
+	return offset
+}
+
+x86_sub64_rm_mem_from_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+
+	buffer[offset] = 0x2B
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = op, rex = rex)
+	return offset
+}
+
+x86_sub64_reg_from_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(op))
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+
+	buffer[offset] = 0x29
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = op, ptr = dst, rex = rex)
+	return offset
+}
+
+x86_sub32 :: proc {
+	x86_sub32_reg,
+	x86_sub32_rm_mem_to_reg,
+	x86_sub32_reg_to_rm_mem,
+	x86_sub32_reg_imm,
+	x86_sub32_rm_mem_imm,
+}
+
+x86_sub32_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i32,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, .None, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+		rex.b = u8(dst) & 0b1000 > 0
+	}
+
+	if i32(i8(imm)) == imm {
+		buffer[offset] = 0x83
+		offset += 1
+
+		_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, op = 5, rex = rex)
+		
+		buffer[offset] = transmute(u8)i8(imm)
+		offset += 1
+	} else {
+		if dst == .AX {
+			buffer[offset] = 0x2D
+			offset += 1
+		} else {
+			buffer[offset] = 0x81
+			offset += 1
+
+			_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, op = 5, rex = rex)
+		}
+		(transmute(^type_of(imm))&buffer[offset])^ = imm
+		offset += size_of(imm)
+	}
+	return offset
+}
+
+x86_sub32_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i32,
+) -> int {
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	if i32(i8(imm)) == imm {
+		buffer[offset] = 0x83
+		offset += 1
+
+		_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 5, rex = rex)
+		
+		buffer[offset] = transmute(u8)i8(imm)
+		offset += 1
+	} else {
+		buffer[offset] = 0x81
+		offset += 1
+
+		_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 5, rex = rex)
+		(transmute(^type_of(imm))&buffer[offset])^ = imm
+		offset += size_of(imm)
+	}
+	return offset
+}
+
+x86_sub32_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst) && _x86_is_gpl(op))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, op, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x29
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = op, rm = dst, rex = rex)
+	return offset
+}
+
+x86_sub32_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ op.base, op.index, dst }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x2B
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = op, rex = rex)
+	return offset
+}
+
+x86_sub32_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(op))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, op }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x29
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = op, ptr = dst, rex = rex)
+	return offset
+}
+
+x86_sub16 :: proc {
+	x86_sub16_reg,
+	x86_sub16_rm_mem_to_reg,
+	x86_sub16_reg_to_rm_mem,
+	x86_sub16_reg_imm,
+	x86_sub16_rm_mem_imm,
+}
+
+x86_sub16_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i16,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	buffer[offset] = 0x66
+	offset += 1
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, .None, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+		rex.b = u8(dst) & 0b1000 > 0
+	}
+
+	if i16(i8(imm)) == imm {
+		buffer[offset] = 0x83
+		offset += 1
+
+		_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, op = 5, rex = rex)
+		
+		buffer[offset] = transmute(u8)i8(imm)
+		offset += 1
+	} else {
+		if dst == .AX {
+			buffer[offset] = 0x2D
+			offset += 1
+		} else {
+			buffer[offset] = 0x81
+			offset += 1
+
+			_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, op = 5, rex = rex)
+		}
+		(transmute(^type_of(imm))&buffer[offset])^ = imm
+		offset += size_of(imm)
+	}
+	return offset
+}
+
+x86_sub16_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i16,
+) -> int {
+	offset: int = 0
+
+	buffer[offset] = 0x66
+	offset += 1
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	if i16(i8(imm)) == imm {
+		buffer[offset] = 0x83
+		offset += 1
+
+		_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 5, rex = rex)
+		
+		buffer[offset] = transmute(u8)i8(imm)
+		offset += 1
+	} else {
+		buffer[offset] = 0x81
+		offset += 1
+
+		_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 5, rex = rex)
+		(transmute(^type_of(imm))&buffer[offset])^ = imm
+		offset += size_of(imm)
+	}
+	return offset
+}
+
+x86_sub16_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst) && _x86_is_gpl(op))
+	offset: int = 0
+
+	buffer[offset] = 0x66
+	offset += 1
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, op, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x29
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = op, rm = dst, rex = rex)
+	return offset
+}
+
+x86_sub16_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	buffer[offset] = 0x66
+	offset += 1
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ op.base, op.index, dst }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x2B
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = op, rex = rex)
+	return offset
+}
+
+x86_sub16_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(op))
+	offset: int = 0
+
+	buffer[offset] = 0x66
+	offset += 1
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, op }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x29
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = op, ptr = dst, rex = rex)
+	return offset
+}
+
+x86_sub8 :: proc {
+	x86_sub8_reg,
+	x86_sub8_rm_mem_to_reg,
+	x86_sub8_reg_to_rm_mem,
+	x86_sub8_reg_imm,
+	x86_sub8_rm_mem_imm,
+}
+
+x86_sub8_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i8,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, .None, .None }) || _x86_is_rex_needed_for_8breg(dst) {
+		rex = _x86_enc_rex(buffer, &offset)
+		rex.b = u8(dst) & 0b1000 > 0
+	}
+
+	if dst == .AX {
+		buffer[offset] = 0x2C
+		offset += 1
+	} else {
+		buffer[offset] = 0x80
+		offset += 1
+
+		_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, op = 5, rex = rex)
+	}
+	buffer[offset] = transmute(u8)imm
+	offset += 1
+	return offset
+}
+
+x86_sub8_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i8,
+) -> int {
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x80
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 5, rex = rex)
+	
+	buffer[offset] = transmute(u8)i8(imm)
+	offset += 1
+	return offset
+}
+
+x86_sub8_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	assert(_x86_is_gpl(op) || _x86_is_gph(op))
+	assert(!(_x86_is_gph(dst) && _x86_is_rex_needed_for_8breg(op)))
+	assert(!(_x86_is_gph(op) && _x86_is_rex_needed_for_8breg(dst)))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, op, .None }) || _x86_is_rex_needed_for_8bregs(dst, op) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x28
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = op, rm = dst, rex = rex)
+	return offset
+}
+
+x86_sub8_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ op.base, op.index, dst }) || _x86_is_rex_needed_for_8breg(dst) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x2A
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = op, rex = rex)
+	return offset
+}
+
+x86_sub8_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(op) || _x86_is_gph(op))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, op }) || _x86_is_rex_needed_for_8breg(op) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0x28
 	offset += 1
 
 	_x86_enc_rm_mem(buffer, &offset, reg = op, ptr = dst, rex = rex)
