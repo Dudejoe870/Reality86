@@ -2102,7 +2102,7 @@ x86_Condition_Code :: enum u8 {
 	Greater               = NeitherLessOrEqual,
 }
 
-x86_Jcc :: proc(
+x86_jcc :: proc(
 	buffer: []u8, 
 	rel: i32,
 	cond: x86_Condition_Code,
@@ -2124,5 +2124,148 @@ x86_Jcc :: proc(
 		(transmute(^type_of(rel))&buffer[offset+2])^ = rel
 		offset += 2 + size_of(rel)
 	}
+	return offset
+}
+
+x86_cmov64 :: proc {
+	x86_cmov64_reg,
+	x86_cmov64_from_rm_mem,
+}
+
+x86_cmov64_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, src: x86_Reg,
+	cond: x86_Condition_Code,
+) -> int {
+	assert(_x86_is_gpl(src) && _x86_is_gpl(dst))
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = 0x40 | u8(cond)
+	offset += 2
+
+	_x86_enc_rm_reg(buffer, &offset, reg = dst, rm = src, rex = rex)
+	return offset
+}
+
+x86_cmov64_from_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Reg, src: x86_Mem,
+	cond: x86_Condition_Code,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = 0x40 | u8(cond)
+	offset += 2
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = src, rex = rex)
+	return offset
+}
+
+x86_cmov32 :: proc {
+	x86_cmov32_reg,
+	x86_cmov32_from_rm_mem,
+}
+
+x86_cmov32_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, src: x86_Reg,
+	cond: x86_Condition_Code,
+) -> int {
+	assert(_x86_is_gpl(src) && _x86_is_gpl(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, src, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = 0x40 | u8(cond)
+	offset += 2
+
+	_x86_enc_rm_reg(buffer, &offset, reg = dst, rm = src, rex = rex)
+	return offset
+}
+
+x86_cmov32_from_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Reg, src: x86_Mem,
+	cond: x86_Condition_Code,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, src.base, src.index }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = 0x40 | u8(cond)
+	offset += 2
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = src, rex = rex)
+	return offset
+}
+
+x86_cmov16 :: proc {
+	x86_cmov16_reg,
+	x86_cmov16_from_rm_mem,
+}
+
+x86_cmov16_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, src: x86_Reg,
+	cond: x86_Condition_Code,
+) -> int {
+	assert(_x86_is_gpl(src) && _x86_is_gpl(dst))
+	offset: int = 0
+
+	buffer[offset] = 0x66
+	offset += 1
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, src, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = 0x40 | u8(cond)
+	offset += 2
+
+	_x86_enc_rm_reg(buffer, &offset, reg = dst, rm = src, rex = rex)
+	return offset
+}
+
+x86_cmov16_from_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Reg, src: x86_Mem,
+	cond: x86_Condition_Code,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	buffer[offset] = 0x66
+	offset += 1
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, src.base, src.index }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = 0x40 | u8(cond)
+	offset += 2
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = src, rex = rex)
 	return offset
 }
