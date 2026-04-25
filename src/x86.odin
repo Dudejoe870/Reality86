@@ -2593,6 +2593,249 @@ x86_neg8_mem :: proc(
 	return offset
 }
 
+_x86_bit_test_reg :: proc(
+	buffer: []u8, 
+	test: x86_Reg, index: x86_Reg, 
+	$opsize: int,
+	opcode: u8,
+) -> int {
+	assert(_x86_is_gpl(test) && _x86_is_gpl(index))
+	offset: int = 0
+
+	when opsize == 2 {
+		buffer[offset] = 0x66
+		offset += 1
+	}
+
+	when opsize == 8 {
+		rex := _x86_enc_rex(buffer, &offset)
+		rex.w = true
+	} else when opsize == 4 || opsize == 2 {
+		rex: ^x86_REX
+		if _x86_is_rex_needed({ test, index, .None }) {
+			rex = _x86_enc_rex(buffer, &offset)
+		}
+	}
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = opcode
+	offset += 2
+
+	_x86_enc_rm_reg(buffer, &offset, reg = index, rm = test, rex = rex)
+	return offset
+}
+
+_x86_bit_test_mem :: proc(
+	buffer: []u8, 
+	test: x86_Mem, index: x86_Reg, 
+	$opsize: int,
+	opcode: u8,
+) -> int {
+	assert(_x86_is_gpl(index))
+	offset: int = 0
+
+	when opsize == 2 {
+		buffer[offset] = 0x66
+		offset += 1
+	}
+
+	when opsize == 8 {
+		rex := _x86_enc_rex(buffer, &offset)
+		rex.w = true
+	} else when opsize == 4 || opsize == 2 {
+		rex: ^x86_REX
+		if _x86_is_rex_needed({ index, test.base, test.index }) {
+			rex = _x86_enc_rex(buffer, &offset)
+		}
+	}
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = opcode
+	offset += 2
+
+	_x86_enc_rm_mem(buffer, &offset, reg = index, ptr = test, rex = rex)
+	return offset
+}
+
+_x86_bit_test_reg_imm :: proc(
+	buffer: []u8, 
+	test: x86_Reg, index: u8, 
+	$opsize: int,
+	opcode: u8,
+	regop: u8,
+) -> int {
+	assert(_x86_is_gpl(test) && _x86_is_gpl(index))
+	offset: int = 0
+
+	when opsize == 2 {
+		buffer[offset] = 0x66
+		offset += 1
+	}
+
+	when opsize == 8 {
+		rex := _x86_enc_rex(buffer, &offset)
+		rex.w = true
+	} else when opsize == 4 || opsize == 2 {
+		rex: ^x86_REX
+		if _x86_is_rex_needed({ test, .None, .None }) {
+			rex = _x86_enc_rex(buffer, &offset)
+		}
+	}
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = opcode
+	offset += 2
+
+	_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = test, op = regop, rex = rex)
+
+	buffer[offset] = index
+	offset += 1
+	return offset
+}
+
+_x86_bit_test_mem_imm :: proc(
+	buffer: []u8, 
+	test: x86_Mem, index: u8, 
+	$opsize: int,
+	opcode: u8,
+	regop: u8,
+) -> int {
+	assert(_x86_is_gpl(test) && _x86_is_gpl(index))
+	offset: int = 0
+
+	when opsize == 2 {
+		buffer[offset] = 0x66
+		offset += 1
+	}
+
+	when opsize == 8 {
+		rex := _x86_enc_rex(buffer, &offset)
+		rex.w = true
+	} else when opsize == 4 || opsize == 2 {
+		rex: ^x86_REX
+		if _x86_is_rex_needed({ test.base, test.index, .None }) {
+			rex = _x86_enc_rex(buffer, &offset)
+		}
+	}
+
+	buffer[offset  ] = 0x0F
+	buffer[offset+1] = opcode
+	offset += 2
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = test, op = regop, rex = rex)
+
+	buffer[offset] = index
+	offset += 1
+	return offset
+}
+
+x86_bt64 :: proc {
+	x86_bt64_reg,
+	x86_bt64_mem,
+	x86_bt64_reg_imm,
+	x86_bt64_mem_imm,
+}
+
+x86_bt64_reg :: proc(
+	buffer: []u8,
+	test: x86_Reg, index: x86_Reg,
+) -> int {
+	return _x86_bit_test_reg(buffer, test, index, 8, 0xA3)
+}
+
+x86_bt64_mem :: proc(
+	buffer: []u8,
+	test: x86_Mem, index: x86_Reg,
+) -> int {
+	return _x86_bit_test_mem(buffer, test, index, 8, 0xA3)
+}
+
+x86_bt64_reg_imm :: proc(
+	buffer: []u8,
+	test: x86_Reg, index: u8,
+) -> int {
+	return _x86_bit_test_reg_imm(buffer, test, index, 8, 0xBA, 4)
+}
+
+x86_bt64_mem_imm :: proc(
+	buffer: []u8,
+	test: x86_Mem, index: u8,
+) -> int {
+	return _x86_bit_test_mem_imm(buffer, test, index, 8, 0xBA, 4)
+}
+
+x86_bt32 :: proc {
+	x86_bt32_reg,
+	x86_bt32_mem,
+	x86_bt32_reg_imm,
+	x86_bt32_mem_imm,
+}
+
+x86_bt32_reg :: proc(
+	buffer: []u8,
+	test: x86_Reg, index: x86_Reg,
+) -> int {
+	return _x86_bit_test_reg(buffer, test, index, 4, 0xA3)
+}
+
+x86_bt32_mem :: proc(
+	buffer: []u8,
+	test: x86_Mem, index: x86_Reg,
+) -> int {
+	return _x86_bit_test_mem(buffer, test, index, 4, 0xA3)
+}
+
+x86_bt32_reg_imm :: proc(
+	buffer: []u8,
+	test: x86_Reg, index: u8,
+) -> int {
+	return _x86_bit_test_reg_imm(buffer, test, index, 4, 0xBA, 4)
+}
+
+x86_bt32_mem_imm :: proc(
+	buffer: []u8,
+	test: x86_Mem, index: u8,
+) -> int {
+	return _x86_bit_test_mem_imm(buffer, test, index, 4, 0xBA, 4)
+}
+
+x86_bt16 :: proc {
+	x86_bt16_reg,
+	x86_bt16_mem,
+	x86_bt16_reg_imm,
+	x86_bt16_mem_imm,
+}
+
+x86_bt16_reg :: proc(
+	buffer: []u8,
+	test: x86_Reg, index: x86_Reg,
+) -> int {
+	return _x86_bit_test_reg(buffer, test, index, 2, 0xA3)
+}
+
+x86_bt16_mem :: proc(
+	buffer: []u8,
+	test: x86_Mem, index: x86_Reg,
+) -> int {
+	return _x86_bit_test_mem(buffer, test, index, 2, 0xA3)
+}
+
+x86_bt16_reg_imm :: proc(
+	buffer: []u8,
+	test: x86_Reg, index: u8,
+) -> int {
+	return _x86_bit_test_reg_imm(buffer, test, index, 2, 0xBA, 4)
+}
+
+x86_bt16_mem_imm :: proc(
+	buffer: []u8,
+	test: x86_Mem, index: u8,
+) -> int {
+	return _x86_bit_test_mem_imm(buffer, test, index, 2, 0xBA, 4)
+}
+
+// TODO: other bit test instructions
+
 x86_cmp64 :: proc {
 	x86_cmp64_reg,
 	x86_cmp64_rm_mem_from_reg,
