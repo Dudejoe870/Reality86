@@ -1136,7 +1136,7 @@ x86_retn :: proc(
 	return 1 + size_of(imm)
 }
 
-_x86_basic_alu_reg_imm :: #force_inline proc(
+_x86_basic_alu_reg_imm :: proc(
 	buffer: []u8, 
 	dst: x86_Reg, imm: $T,
 	$opsize: int,
@@ -1189,7 +1189,7 @@ _x86_basic_alu_reg_imm :: #force_inline proc(
 	return offset
 }
 
-_x86_basic_alu_rm_mem_imm :: #force_inline proc(
+_x86_basic_alu_rm_mem_imm :: proc(
 	buffer: []u8, 
 	dst: x86_Mem, imm: $T,
 	$opsize: int,
@@ -1233,7 +1233,7 @@ _x86_basic_alu_rm_mem_imm :: #force_inline proc(
 	return offset
 }
 
-_x86_basic_alu_reg :: #force_inline proc(
+_x86_basic_alu_reg :: proc(
 	buffer: []u8,
 	dst: x86_Reg, op: x86_Reg, 
 	$opsize: int,
@@ -1264,7 +1264,7 @@ _x86_basic_alu_reg :: #force_inline proc(
 	return offset
 }
 
-_x86_basic_alu_mem :: #force_inline proc(
+_x86_basic_alu_mem :: proc(
 	buffer: []u8,
 	reg: x86_Reg, ptr: x86_Mem, 
 	$opsize: int,
@@ -1295,7 +1295,7 @@ _x86_basic_alu_mem :: #force_inline proc(
 	return offset
 }
 
-_x86_basic_alu8_rm_mem_imm :: #force_inline proc(
+_x86_basic_alu8_rm_mem_imm :: proc(
 	buffer: []u8,
 	dst: x86_Mem, imm: i8,
 	baseop: u8,
@@ -1318,7 +1318,7 @@ _x86_basic_alu8_rm_mem_imm :: #force_inline proc(
 	return offset
 }
 
-_x86_basic_alu8_reg :: #force_inline proc(
+_x86_basic_alu8_reg :: proc(
 	buffer: []u8,
 	dst: x86_Reg, op: x86_Reg,
 	opcode: u8,
@@ -1341,7 +1341,7 @@ _x86_basic_alu8_reg :: #force_inline proc(
 	return offset
 }
 
-_x86_basic_alu8_mem :: #force_inline proc(
+_x86_basic_alu8_mem :: proc(
 	buffer: []u8,
 	reg: x86_Reg, ptr: x86_Mem,
 	opcode: u8,
@@ -1361,7 +1361,7 @@ _x86_basic_alu8_mem :: #force_inline proc(
 	return offset
 }
 
-_x86_basic_alu8_reg_imm :: #force_inline proc(
+_x86_basic_alu8_reg_imm :: proc(
 	buffer: []u8,
 	dst: x86_Reg, imm: i8,
 	baseop: u8,
