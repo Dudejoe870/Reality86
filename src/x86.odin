@@ -2817,6 +2817,121 @@ x86_jcc :: proc(
 	return offset
 }
 
+x86_jmp :: proc {
+	x86_jmp_rel,
+	x86_jmp_to_reg,
+	x86_jmp_to_rm_mem,
+}
+
+x86_jmp_rel :: proc(
+	buffer: []u8,
+	rel: i32,
+) -> int {
+	offset: int = 0
+	if i32(i8(rel)) == rel {
+		buffer[offset  ] = 0xEB
+		buffer[offset+1] = transmute(u8)i8(rel)
+		offset += 2
+	} else {
+		buffer[offset] = 0xE9
+		(transmute(^type_of(rel))&buffer[offset+1])^ = rel
+		offset += 1 + size_of(rel)
+	}
+	return offset
+}
+
+x86_jmp_to_reg :: proc(
+	buffer: []u8,
+	abs: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(abs))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ abs, .None, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xFF
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = abs, rex = rex, op = 4)
+	return offset
+}
+
+x86_jmp_to_rm_mem :: proc(
+	buffer: []u8,
+	abs: x86_Mem,
+) -> int {
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ abs.base, abs.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xFF
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = abs, rex = rex, op = 4)
+	return offset
+}
+
+x86_call :: proc {
+	x86_call_rel,
+	x86_call_reg,
+	x86_call_rm_mem,
+}
+
+x86_call_rel :: proc(
+	buffer: []u8,
+	rel: i32,
+) -> int {
+	offset: int = 0
+
+	buffer[offset] = 0xE8
+	(transmute(^type_of(rel))&buffer[offset+1])^ = rel
+	offset += 1 + size_of(rel)
+	return offset
+}
+
+x86_call_to_reg :: proc(
+	buffer: []u8,
+	abs: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(abs))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ abs, .None, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xFF
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = abs, rex = rex, op = 2)
+	return offset
+}
+
+x86_call_to_rm_mem :: proc(
+	buffer: []u8,
+	abs: x86_Mem,
+) -> int {
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ abs.base, abs.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xFF
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = abs, rex = rex, op = 2)
+	return offset
+}
+
 x86_cmov64 :: proc {
 	x86_cmov64_reg,
 	x86_cmov64_from_rm_mem,
