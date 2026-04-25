@@ -2895,7 +2895,7 @@ x86_call_rel :: proc(
 	return offset
 }
 
-x86_call_to_reg :: proc(
+x86_call_reg :: proc(
 	buffer: []u8,
 	abs: x86_Reg,
 ) -> int {
@@ -2914,7 +2914,7 @@ x86_call_to_reg :: proc(
 	return offset
 }
 
-x86_call_to_rm_mem :: proc(
+x86_call_rm_mem :: proc(
 	buffer: []u8,
 	abs: x86_Mem,
 ) -> int {
