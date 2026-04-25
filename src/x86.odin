@@ -2664,7 +2664,7 @@ _x86_bit_test_reg_imm :: proc(
 	opcode: u8,
 	regop: u8,
 ) -> int {
-	assert(_x86_is_gpl(test) && _x86_is_gpl(index))
+	assert(_x86_is_gpl(test))
 	offset: int = 0
 
 	when opsize == 2 {
@@ -2700,7 +2700,6 @@ _x86_bit_test_mem_imm :: proc(
 	opcode: u8,
 	regop: u8,
 ) -> int {
-	assert(_x86_is_gpl(test) && _x86_is_gpl(index))
 	offset: int = 0
 
 	when opsize == 2 {
