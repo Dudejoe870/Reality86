@@ -2808,12 +2808,6 @@ x86_jcc :: proc(
 		buffer[offset  ] = 0x70 | u8(cond)
 		buffer[offset+1] = transmute(u8)i8(rel)
 		offset += 2
-	} else if i32(i16(rel)) == rel {
-		buffer[offset  ] = 0x66
-		buffer[offset+1] = 0x0F
-		buffer[offset+2] = 0x80 | u8(cond)
-		(transmute(^i16)&buffer[offset+3])^ = i16(rel)
-		offset += 3 + size_of(i16)
 	} else {
 		buffer[offset  ] = 0x0F
 		buffer[offset+1] = 0x80 | u8(cond)
