@@ -4,6 +4,7 @@ import "core:mem"
 import vmem "core:mem/virtual"
 
 JIT_MAX_EXEC_BUFFER :: mem.DEFAULT_PAGE_SIZE * 256
+Jit_Block_Proc :: #type proc "c" (n64: ^N64_System)
 
 Execute_Buffer :: struct {
 	data: []u8,
@@ -24,10 +25,15 @@ jit_init :: proc(jit: ^JIT) {
 jit_run :: proc(jit: ^JIT) {
 	ensure(_jit_allow_write(jit))
 	
-	jit.offs += x86_push64(_jit_next_buf(jit), x86_Reg.BP)
-	jit.offs += x86_mov64(_jit_next_buf(jit), x86_Reg.BP, x86_Reg.SP)
-	jit.offs += x86_mov64(_jit_next_buf(jit), x86_Reg.AX, i64(34))
-	jit.offs += x86_pop64(_jit_next_buf(jit), x86_Reg.BP)
+	// TODO: THIS IS VERY WINDOWS CENTRIC, when I implement the actual codegen code, 
+	// both SystemV and the Microsoft x64 ABIs will be implemented.
+	jit.offs += x86_mov64(_jit_next_buf(jit), x86_Mem { base = .SP, offset = 8 }, x86_Reg.CX)
+	jit.offs += x86_push64(_jit_next_buf(jit), x86_Reg.R15)
+	jit.offs += x86_push64(_jit_next_buf(jit), x86_Reg.R14)
+	jit.offs += x86_push64(_jit_next_buf(jit), x86_Reg.R13)
+	jit.offs += x86_pop64(_jit_next_buf(jit), x86_Reg.R13)
+	jit.offs += x86_pop64(_jit_next_buf(jit), x86_Reg.R14)
+	jit.offs += x86_pop64(_jit_next_buf(jit), x86_Reg.R15)
 	jit.offs += x86_ret(_jit_next_buf(jit))
 	
 	ensure(_jit_allow_execute(jit))
@@ -42,8 +48,8 @@ _jit_next_buf :: #force_inline proc(jit: ^JIT, location := #caller_location) -> 
 }
 
 _jit_execute_block :: proc (jit: ^JIT, block_offset: int) {
-	fptr := transmute(proc "c" ())raw_data(jit.data[block_offset:])
-	fptr()
+	fptr := transmute(Jit_Block_Proc)raw_data(jit.data[block_offset:])
+	fptr(n64)
 }
 
 _jit_allow_execute :: proc (jit: ^JIT) -> bool {
