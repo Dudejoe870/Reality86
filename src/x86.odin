@@ -34,7 +34,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //  _______________________________    ____________________________________________
 //  |                             |    |                                          |
 //  [Prefixes] -> [REX] -> [Opcode] -> [Mod R/M] -> [SIB] -> [Pointer Displacement] -> [Immediate]
-//   ^ opt         ^ opt/doo            ^ doi        ^ doo    ^ doo                     ^ doi
+//   ^ opt/doo    ^ opt/doo            ^ doi        ^ doo    ^ doo                     ^ doi
 //
 //     First you have the prefixes, these come in various forms; 
 //   for example 0x66 is an operand size prefix, 
@@ -168,12 +168,7 @@ _x86_enc_rm_reg :: #force_inline proc(
 	rm: x86_Reg,
 	rex: ^x86_REX = nil,
 	op: u8 = 0,
-	is_8bit := false,
 ) {
-	assert(!(is_8bit && rex == nil && _x86_is_gpl(reg) && u8(reg) & 0b111 >= 4))
-	assert(!(is_8bit && rex == nil && _x86_is_gpl(rm) && u8(rm) & 0b111 >= 4))
-	assert(!(is_8bit && rex != nil && _x86_is_gph(reg)))
-	assert(!(is_8bit && rex != nil && _x86_is_gph(rm)))
 	assert(!(rex == nil && (u8(reg) & 0b1111 > 0b111 || u8(rm) & 0b1111 > 0b111)))
 	mod_rm := x86_Mod_RM {
 		reg_or_op = op if reg == .None else u8(reg) & 0b111,
@@ -195,16 +190,11 @@ _x86_enc_rm_mem :: proc(
 	ptr: x86_Mem,
 	rex: ^x86_REX = nil,
 	op: u8 = 0,
-	is_8bit := false,
 ) {
-	assert(_x86_is_gpl(ptr.base) || (is_8bit && _x86_is_gph(ptr.base)))
-	assert(_x86_is_gpl(ptr.index) || (is_8bit && _x86_is_gph(ptr.index)))
 	assert(!(rex == nil && (u8(reg) & 0b1111 > 0b111 || u8(ptr.base) & 0b1111 > 0b111 || u8(ptr.index) & 0b1111 > 0b111)))
 	assert(ptr.index != .SP)
 	assert(!(ptr.base == .IP && ptr.index != .None))
 	assert(ptr.scale == 0 || ptr.scale == 1 || ptr.scale == 2 || ptr.scale == 4 || ptr.scale == 8)
-	assert(!(is_8bit && rex == nil && _x86_is_gpl(reg) && u8(reg) & 0b1111 >= 4))
-	assert(!(is_8bit && rex != nil && _x86_is_gph(reg)))
 	mod_rm := x86_Mod_RM {
 		reg_or_op = op if reg == .None else u8(reg) & 0b111,
 		mod = 0b00,
@@ -656,7 +646,7 @@ x86_mov8_rm_mem_imm :: proc(
 	buffer[offset] = 0xC6
 	offset += 1
 
-	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 0, rex = rex, is_8bit = true)
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, op = 0, rex = rex)
 
 	buffer[offset] = transmute(u8)imm
 	offset += 1
@@ -681,7 +671,7 @@ x86_mov8_reg :: proc(
 	buffer[offset] = 0x88
 	offset += 1
 
-	_x86_enc_rm_reg(buffer, &offset, reg = src, rm = dst, rex = rex, is_8bit = true)
+	_x86_enc_rm_reg(buffer, &offset, reg = src, rm = dst, rex = rex)
 	return offset
 }
 
@@ -700,7 +690,7 @@ x86_mov8_to_rm_mem :: proc(
 	buffer[offset] = 0x88
 	offset += 1
 
-	_x86_enc_rm_mem(buffer, &offset, reg = src, ptr = dst, rex = rex, is_8bit = true)
+	_x86_enc_rm_mem(buffer, &offset, reg = src, ptr = dst, rex = rex)
 	return offset
 }
 
@@ -719,7 +709,7 @@ x86_mov8_from_rm_mem :: proc(
 	buffer[offset] = 0x8A
 	offset += 1
 
-	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = src, rex = rex, is_8bit = true)
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = src, rex = rex)
 	return offset
 }
 
@@ -863,6 +853,26 @@ x86_movbe64_to_rm_mem :: proc(
 	offset += 3
 
 	_x86_enc_rm_mem(buffer, &offset, reg = src, ptr = dst, rex = rex)
+	return offset
+}
+
+// I only implement the 64-bit operand version because... 
+// in 64-bit mode is there any reason for any other 
+// operand size???
+x86_lea :: proc(
+	buffer: []u8,
+	dst: x86_Reg, src: x86_Mem,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+
+	buffer[offset] = 0x8D
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = dst, ptr = src, rex = rex)
 	return offset
 }
 
@@ -1770,8 +1780,8 @@ x86_sub64_reg_from_rm_mem :: proc(
 
 x86_sub32 :: proc {
 	x86_sub32_reg,
-	x86_sub32_rm_mem_to_reg,
-	x86_sub32_reg_to_rm_mem,
+	x86_sub32_rm_mem_from_reg,
+	x86_sub32_reg_from_rm_mem,
 	x86_sub32_reg_imm,
 	x86_sub32_rm_mem_imm,
 }
@@ -1797,14 +1807,14 @@ x86_sub32_reg :: proc(
 	return _x86_basic_alu_reg(buffer, dst, op, 4, 0x29)
 }
 
-x86_sub32_rm_mem_to_reg :: proc(
+x86_sub32_rm_mem_from_reg :: proc(
 	buffer: []u8,
 	dst: x86_Reg, op: x86_Mem,
 ) -> int {
 	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 4, opcode = 0x2B)
 }
 
-x86_sub32_reg_to_rm_mem :: proc(
+x86_sub32_reg_from_rm_mem :: proc(
 	buffer: []u8,
 	dst: x86_Mem, op: x86_Reg,
 ) -> int {
@@ -1813,8 +1823,8 @@ x86_sub32_reg_to_rm_mem :: proc(
 
 x86_sub16 :: proc {
 	x86_sub16_reg,
-	x86_sub16_rm_mem_to_reg,
-	x86_sub16_reg_to_rm_mem,
+	x86_sub16_rm_mem_from_reg,
+	x86_sub16_reg_from_rm_mem,
 	x86_sub16_reg_imm,
 	x86_sub16_rm_mem_imm,
 }
@@ -1840,14 +1850,14 @@ x86_sub16_reg :: proc(
 	return _x86_basic_alu_reg(buffer, dst, op, 2, 0x29)
 }
 
-x86_sub16_rm_mem_to_reg :: proc(
+x86_sub16_rm_mem_from_reg :: proc(
 	buffer: []u8,
 	dst: x86_Reg, op: x86_Mem,
 ) -> int {
 	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 2, opcode = 0x2B)
 }
 
-x86_sub16_reg_to_rm_mem :: proc(
+x86_sub16_reg_from_rm_mem :: proc(
 	buffer: []u8,
 	dst: x86_Mem, op: x86_Reg,
 ) -> int {
@@ -1856,8 +1866,8 @@ x86_sub16_reg_to_rm_mem :: proc(
 
 x86_sub8 :: proc {
 	x86_sub8_reg,
-	x86_sub8_rm_mem_to_reg,
-	x86_sub8_reg_to_rm_mem,
+	x86_sub8_rm_mem_from_reg,
+	x86_sub8_reg_from_rm_mem,
 	x86_sub8_reg_imm,
 	x86_sub8_rm_mem_imm,
 }
@@ -1883,18 +1893,704 @@ x86_sub8_reg :: proc(
 	return _x86_basic_alu8_reg(buffer, dst, op, 0x28)
 }
 
-x86_sub8_rm_mem_to_reg :: proc(
+x86_sub8_rm_mem_from_reg :: proc(
 	buffer: []u8,
 	dst: x86_Reg, op: x86_Mem,
 ) -> int {
 	return _x86_basic_alu8_mem(buffer, reg = dst, ptr = op, opcode = 0x2A)
 }
 
-x86_sub8_reg_to_rm_mem :: proc(
+x86_sub8_reg_from_rm_mem :: proc(
 	buffer: []u8,
 	dst: x86_Mem, op: x86_Reg,
 ) -> int {
 	return _x86_basic_alu8_mem(buffer, reg = op, ptr = dst, opcode = 0x28)
+}
+
+x86_and64 :: proc {
+	x86_and64_reg,
+	x86_and64_rm_mem_to_reg,
+	x86_and64_reg_to_rm_mem,
+	x86_and64_reg_imm,
+	x86_and64_rm_mem_imm,
+}
+
+x86_and64_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i32,
+) -> int {
+	return _x86_basic_alu_reg_imm(buffer, dst, imm, 8, 0x83, 0x81, 4, 0x25)
+}
+
+x86_and64_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i32,
+) -> int {
+	return _x86_basic_alu_rm_mem_imm(buffer, dst, imm, 8, 0x83, 0x81, 4)
+}
+
+x86_and64_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_reg(buffer, dst, op, 8, 0x21)
+}
+
+x86_and64_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 8, opcode = 0x23)
+}
+
+x86_and64_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = op, ptr = dst, opsize = 8, opcode = 0x21)
+}
+
+x86_and32 :: proc {
+	x86_and32_reg,
+	x86_and32_rm_mem_to_reg,
+	x86_and32_reg_to_rm_mem,
+	x86_and32_reg_imm,
+	x86_and32_rm_mem_imm,
+}
+
+x86_and32_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i32,
+) -> int {
+	return _x86_basic_alu_reg_imm(buffer, dst, imm, 4, 0x83, 0x81, 4, 0x25)
+}
+
+x86_and32_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i32,
+) -> int {
+	return _x86_basic_alu_rm_mem_imm(buffer, dst, imm, 4, 0x83, 0x81, 4)
+}
+
+x86_and32_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_reg(buffer, dst, op, 4, 0x21)
+}
+
+x86_and32_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 4, opcode = 0x23)
+}
+
+x86_and32_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = op, ptr = dst, opsize = 4, opcode = 0x21)
+}
+
+x86_and16 :: proc {
+	x86_and16_reg,
+	x86_and16_rm_mem_to_reg,
+	x86_and16_reg_to_rm_mem,
+	x86_and16_reg_imm,
+	x86_and16_rm_mem_imm,
+}
+
+x86_and16_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i16,
+) -> int {
+	return _x86_basic_alu_reg_imm(buffer, dst, imm, 2, 0x83, 0x81, 4, 0x25)
+}
+
+x86_and16_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i16,
+) -> int {
+	return _x86_basic_alu_rm_mem_imm(buffer, dst, imm, 2, 0x83, 0x81, 4)
+}
+
+x86_and16_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_reg(buffer, dst, op, 2, 0x21)
+}
+
+x86_and16_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 2, opcode = 0x23)
+}
+
+x86_and16_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = op, ptr = dst, opsize = 2, opcode = 0x21)
+}
+
+x86_and8 :: proc {
+	x86_and8_reg,
+	x86_and8_rm_mem_to_reg,
+	x86_and8_reg_to_rm_mem,
+	x86_and8_reg_imm,
+	x86_and8_rm_mem_imm,
+}
+
+x86_and8_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i8,
+) -> int {
+	return _x86_basic_alu8_reg_imm(buffer, dst, imm, 0x80, 4, 0x24)
+}
+
+x86_and8_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i8,
+) -> int {
+	return _x86_basic_alu8_rm_mem_imm(buffer, dst, imm, 0x80, 4)
+}
+
+x86_and8_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu8_reg(buffer, dst, op, 0x20)
+}
+
+x86_and8_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu8_mem(buffer, reg = dst, ptr = op, opcode = 0x22)
+}
+
+x86_and8_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu8_mem(buffer, reg = op, ptr = dst, opcode = 0x20)
+}
+
+x86_or64 :: proc {
+	x86_or64_reg,
+	x86_or64_rm_mem_to_reg,
+	x86_or64_reg_to_rm_mem,
+	x86_or64_reg_imm,
+	x86_or64_rm_mem_imm,
+}
+
+x86_or64_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i32,
+) -> int {
+	return _x86_basic_alu_reg_imm(buffer, dst, imm, 8, 0x83, 0x81, 1, 0x0D)
+}
+
+x86_or64_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i32,
+) -> int {
+	return _x86_basic_alu_rm_mem_imm(buffer, dst, imm, 8, 0x83, 0x81, 1)
+}
+
+x86_or64_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_reg(buffer, dst, op, 8, 0x09)
+}
+
+x86_or64_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 8, opcode = 0x0B)
+}
+
+x86_or64_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = op, ptr = dst, opsize = 8, opcode = 0x09)
+}
+
+x86_or32 :: proc {
+	x86_or32_reg,
+	x86_or32_rm_mem_to_reg,
+	x86_or32_reg_to_rm_mem,
+	x86_or32_reg_imm,
+	x86_or32_rm_mem_imm,
+}
+
+x86_or32_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i32,
+) -> int {
+	return _x86_basic_alu_reg_imm(buffer, dst, imm, 4, 0x83, 0x81, 1, 0x0D)
+}
+
+x86_or32_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i32,
+) -> int {
+	return _x86_basic_alu_rm_mem_imm(buffer, dst, imm, 4, 0x83, 0x81, 1)
+}
+
+x86_or32_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_reg(buffer, dst, op, 4, 0x09)
+}
+
+x86_or32_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 4, opcode = 0x0B)
+}
+
+x86_or32_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = op, ptr = dst, opsize = 4, opcode = 0x09)
+}
+
+x86_or16 :: proc {
+	x86_or16_reg,
+	x86_or16_rm_mem_to_reg,
+	x86_or16_reg_to_rm_mem,
+	x86_or16_reg_imm,
+	x86_or16_rm_mem_imm,
+}
+
+x86_or16_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i16,
+) -> int {
+	return _x86_basic_alu_reg_imm(buffer, dst, imm, 2, 0x83, 0x81, 1, 0x0D)
+}
+
+x86_or16_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i16,
+) -> int {
+	return _x86_basic_alu_rm_mem_imm(buffer, dst, imm, 2, 0x83, 0x81, 1)
+}
+
+x86_or16_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_reg(buffer, dst, op, 2, 0x09)
+}
+
+x86_or16_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 2, opcode = 0x0B)
+}
+
+x86_or16_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = op, ptr = dst, opsize = 2, opcode = 0x09)
+}
+
+x86_or8 :: proc {
+	x86_or8_reg,
+	x86_or8_rm_mem_to_reg,
+	x86_or8_reg_to_rm_mem,
+	x86_or8_reg_imm,
+	x86_or8_rm_mem_imm,
+}
+
+x86_or8_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i8,
+) -> int {
+	return _x86_basic_alu8_reg_imm(buffer, dst, imm, 0x80, 1, 0x0C)
+}
+
+x86_or8_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i8,
+) -> int {
+	return _x86_basic_alu8_rm_mem_imm(buffer, dst, imm, 0x80, 1)
+}
+
+x86_or8_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu8_reg(buffer, dst, op, 0x09)
+}
+
+x86_or8_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu8_mem(buffer, reg = dst, ptr = op, opcode = 0x0B)
+}
+
+x86_or8_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu8_mem(buffer, reg = op, ptr = dst, opcode = 0x09)
+}
+
+x86_xor64 :: proc {
+	x86_xor64_reg,
+	x86_xor64_rm_mem_to_reg,
+	x86_xor64_reg_to_rm_mem,
+	x86_xor64_reg_imm,
+	x86_xor64_rm_mem_imm,
+}
+
+x86_xor64_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i32,
+) -> int {
+	return _x86_basic_alu_reg_imm(buffer, dst, imm, 8, 0x83, 0x81, 6, 0x35)
+}
+
+x86_xor64_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i32,
+) -> int {
+	return _x86_basic_alu_rm_mem_imm(buffer, dst, imm, 8, 0x83, 0x81, 6)
+}
+
+x86_xor64_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_reg(buffer, dst, op, 8, 0x31)
+}
+
+x86_xor64_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 8, opcode = 0x33)
+}
+
+x86_xor64_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = op, ptr = dst, opsize = 8, opcode = 0x31)
+}
+
+x86_xor32 :: proc {
+	x86_xor32_reg,
+	x86_xor32_rm_mem_to_reg,
+	x86_xor32_reg_to_rm_mem,
+	x86_xor32_reg_imm,
+	x86_xor32_rm_mem_imm,
+}
+
+x86_xor32_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i32,
+) -> int {
+	return _x86_basic_alu_reg_imm(buffer, dst, imm, 4, 0x83, 0x81, 6, 0x35)
+}
+
+x86_xor32_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i32,
+) -> int {
+	return _x86_basic_alu_rm_mem_imm(buffer, dst, imm, 4, 0x83, 0x81, 6)
+}
+
+x86_xor32_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_reg(buffer, dst, op, 4, 0x31)
+}
+
+x86_xor32_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 4, opcode = 0x33)
+}
+
+x86_xor32_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = op, ptr = dst, opsize = 4, opcode = 0x31)
+}
+
+x86_xor16 :: proc {
+	x86_xor16_reg,
+	x86_xor16_rm_mem_to_reg,
+	x86_xor16_reg_to_rm_mem,
+	x86_xor16_reg_imm,
+	x86_xor16_rm_mem_imm,
+}
+
+x86_xor16_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i16,
+) -> int {
+	return _x86_basic_alu_reg_imm(buffer, dst, imm, 2, 0x83, 0x81, 6, 0x35)
+}
+
+x86_xor16_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i16,
+) -> int {
+	return _x86_basic_alu_rm_mem_imm(buffer, dst, imm, 2, 0x83, 0x81, 6)
+}
+
+x86_xor16_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_reg(buffer, dst, op, 2, 0x31)
+}
+
+x86_xor16_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = dst, ptr = op, opsize = 2, opcode = 0x33)
+}
+
+x86_xor16_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu_mem(buffer, reg = op, ptr = dst, opsize = 2, opcode = 0x31)
+}
+
+x86_xor8 :: proc {
+	x86_xor8_reg,
+	x86_xor8_rm_mem_to_reg,
+	x86_xor8_reg_to_rm_mem,
+	x86_xor8_reg_imm,
+	x86_xor8_rm_mem_imm,
+}
+
+x86_xor8_reg_imm :: proc(
+	buffer: []u8,
+	dst: x86_Reg, imm: i8,
+) -> int {
+	return _x86_basic_alu8_reg_imm(buffer, dst, imm, 0x80, 6, 0x34)
+}
+
+x86_xor8_rm_mem_imm :: proc(
+	buffer: []u8,
+	dst: x86_Mem, imm: i8,
+) -> int {
+	return _x86_basic_alu8_rm_mem_imm(buffer, dst, imm, 0x80, 6)
+}
+
+x86_xor8_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu8_reg(buffer, dst, op, 0x30)
+}
+
+x86_xor8_rm_mem_to_reg :: proc(
+	buffer: []u8,
+	dst: x86_Reg, op: x86_Mem,
+) -> int {
+	return _x86_basic_alu8_mem(buffer, reg = dst, ptr = op, opcode = 0x32)
+}
+
+x86_xor8_reg_to_rm_mem :: proc(
+	buffer: []u8,
+	dst: x86_Mem, op: x86_Reg,
+) -> int {
+	return _x86_basic_alu8_mem(buffer, reg = op, ptr = dst, opcode = 0x30)
+}
+
+x86_neg64 :: proc {
+	x86_neg64_reg,
+	x86_neg64_mem,
+}
+
+x86_neg64_reg :: proc(
+	buffer: []u8, 
+	dst: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+
+	buffer[offset] = 0xF7
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, rex = rex, op = 3)
+	return offset
+}
+
+x86_neg64_mem :: proc(
+	buffer: []u8, 
+	dst: x86_Mem,
+) -> int {
+	offset: int = 0
+
+	rex := _x86_enc_rex(buffer, &offset)
+	rex.w = true
+
+	buffer[offset] = 0xF7
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, rex = rex, op = 3)
+	return offset
+}
+
+x86_neg32 :: proc {
+	x86_neg32_reg,
+	x86_neg32_mem,
+}
+
+x86_neg32_reg :: proc(
+	buffer: []u8, 
+	dst: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, .None, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xF7
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, rex = rex, op = 3)
+	return offset
+}
+
+x86_neg32_mem :: proc(
+	buffer: []u8, 
+	dst: x86_Mem,
+) -> int {
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xF7
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, rex = rex, op = 3)
+	return offset
+}
+
+x86_neg16 :: proc {
+	x86_neg16_reg,
+	x86_neg16_mem,
+}
+
+x86_neg16_reg :: proc(
+	buffer: []u8, 
+	dst: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst))
+	offset: int = 0
+
+	buffer[offset] = 0x66
+	offset += 1
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, .None, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xF7
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, rex = rex, op = 3)
+	return offset
+}
+
+x86_neg16_mem :: proc(
+	buffer: []u8, 
+	dst: x86_Mem,
+) -> int {
+	offset: int = 0
+
+	buffer[offset] = 0x66
+	offset += 1
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xF7
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, rex = rex, op = 3)
+	return offset
+}
+
+x86_neg8 :: proc {
+	x86_neg8_reg,
+	x86_neg8_mem,
+}
+
+x86_neg8_reg :: proc(
+	buffer: []u8, 
+	dst: x86_Reg,
+) -> int {
+	assert(_x86_is_gpl(dst) || _x86_is_gph(dst))
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst, .None, .None }) || _x86_is_rex_needed_for_8breg(dst) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xF6
+	offset += 1
+
+	_x86_enc_rm_reg(buffer, &offset, reg = .None, rm = dst, rex = rex, op = 3)
+	return offset
+}
+
+x86_neg8_mem :: proc(
+	buffer: []u8, 
+	dst: x86_Mem,
+) -> int {
+	offset: int = 0
+
+	rex: ^x86_REX
+	if _x86_is_rex_needed({ dst.base, dst.index, .None }) {
+		rex = _x86_enc_rex(buffer, &offset)
+	}
+
+	buffer[offset] = 0xF6
+	offset += 1
+
+	_x86_enc_rm_mem(buffer, &offset, reg = .None, ptr = dst, rex = rex, op = 3)
+	return offset
 }
 
 x86_cmp64 :: proc {
